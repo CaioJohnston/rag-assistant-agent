@@ -1,0 +1,13 @@
+streamlit
+langchain
+langchain-openai
+langchain-community
+chromadb
+psycopg2-binary
+azure-search-documents
+requests
+pytest
+python-dotenv
+langsmith
+google-search-results
+serpapi

@@ -1,0 +1,47 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Environments
+.env
+.venv
+env/
+venv/
+ENV/
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+.pytest_cache
+
+# Editors and IDEs
+# VS Code
+.vscode/
+# PyCharm/JetBrains
+.idea/
+# Spyder
+.spyderproject
+.spyproject
+
+# OS-generated files
+.DS_Store # macOS
+Thumbs.db # Windows
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints/
