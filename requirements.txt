@@ -2,9 +2,13 @@ streamlit
 langchain
 langchain-openai
 langchain-community
-chromadb
+langchain-core
+langgraph
 psycopg2-binary
 azure-search-documents
+azure-core
+openai
+pypdf
 requests
 pytest
 python-dotenv
