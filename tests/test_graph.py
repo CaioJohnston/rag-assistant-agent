@@ -3,7 +3,7 @@ test_graph.py — Testes unitários do grafo LangGraph.
 """
 
 from unittest.mock import patch, MagicMock
-from my_agent.agent import build_graph
+from graph.workflow import build_graph
 
 
 def test_graph_compiles():
@@ -23,7 +23,7 @@ def test_graph_routes_to_web_search():
         {"title": "Test", "link": "https://test.com", "snippet": "Test snippet"}
     ]
 
-    with patch("my_agent.utils.tools.SerperSearchTool.run", return_value=mock_results):
+    with patch("tools.web_search.SerperSearchTool.run", return_value=mock_results):
         result = graph.invoke({
             "messages": [{"role": "user", "content": "latest LangChain news"}]
         })
@@ -39,10 +39,10 @@ def test_graph_handles_no_tool():
     """
     graph = build_graph()
 
-    with patch("my_agent.utils.nodes.llm_router") as mock_llm:
+    with patch("graph.nodes.llm_router") as mock_llm:
         mock_llm.invoke.return_value = MagicMock(content="none")
 
-        with patch("my_agent.utils.nodes.llm_responder") as mock_resp:
+        with patch("graph.nodes.llm_responder") as mock_resp:
             mock_resp.invoke.return_value = MagicMock(content="Olá! Como posso ajudar?")
 
             result = graph.invoke({

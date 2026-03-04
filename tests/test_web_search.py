@@ -3,7 +3,7 @@ test_web_search.py — Testes unitários da tool de busca web (Serper).
 """
 
 from unittest.mock import patch, MagicMock
-from my_agent.utils.tools import SerperSearchTool
+from tools.web_search import SerperSearchTool
 
 
 def test_serper_returns_list():

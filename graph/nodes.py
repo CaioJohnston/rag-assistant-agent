@@ -1,5 +1,5 @@
 """
-nodes.py — Funções de nó do grafo LangGraph.
+graph/nodes.py — Funções de nó do grafo LangGraph.
 
 Cada função recebe o AgentState atual e retorna um dict
 com as chaves a serem atualizadas no estado.
@@ -14,15 +14,15 @@ Nós planejados (próximas fases):
 """
 
 from langchain_openai import ChatOpenAI
-from my_agent.utils.state import AgentState
-from my_agent.utils.tools import web_search_tool
+from graph.state import AgentState
+from tools.web_search import web_search_tool
 
 # ─────────────────────────────────────────────
-# LLM do router (leve e rápido)
+# LLMs
 # ─────────────────────────────────────────────
 
 llm_router = ChatOpenAI(model="gpt-4o-mini", temperature=0)
-
+llm_responder = ChatOpenAI(model="gpt-4o-mini", temperature=0.3)
 
 # ─────────────────────────────────────────────
 # ROUTER NODE
@@ -78,15 +78,9 @@ def tool_node(state: AgentState) -> dict:
         result = web_search_tool.run(query)
         return {"tool_result": result}
 
-    # Placeholders — serão implementados nas fases 2.2, 2.3 e 2.4
-    if tool == "rag":
-        return {"tool_result": "[RAG] Ferramenta ainda não implementada."}
-
-    if tool == "sql":
-        return {"tool_result": "[SQL] Ferramenta ainda não implementada."}
-
-    if tool == "weather":
-        return {"tool_result": "[Weather] Ferramenta ainda não implementada."}
+    # Placeholders — implementados nas fases 2.2, 2.3 e 2.4
+    if tool in {"rag", "sql", "weather"}:
+        return {"tool_result": f"[{tool.upper()}] Ferramenta ainda não implementada."}
 
     return {"tool_result": None}
 
@@ -94,8 +88,6 @@ def tool_node(state: AgentState) -> dict:
 # ─────────────────────────────────────────────
 # RESPONSE NODE
 # ─────────────────────────────────────────────
-
-llm_responder = ChatOpenAI(model="gpt-4o-mini", temperature=0.3)
 
 RESPONDER_PROMPT = """
 You are a helpful assistant. Use the tool result below to answer the user's question

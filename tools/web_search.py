@@ -1,40 +1,48 @@
+"""
+tools/web_search.py — Busca no Google via Serper API.
+
+Entrada : query (str), k (int)
+Saída   : List[Dict] com title, link, snippet
+"""
+
 import os
+import requests
 from typing import List, Dict
 from dotenv import load_dotenv
-import requests
+from langchain_core.tools import tool
 
 load_dotenv()
 
-class SerpAPIETool:
+
+class SerperSearchTool:
+    """
+    Wrapper sobre a Serper API (Google Search).
+    Entrada : query (str), k (int) — número de resultados
+    Saída   : List[Dict] com title, link, snippet
+    """
+
     def __init__(self, k: int = 5):
         self.k = k
         self.api_key = os.getenv("SERPAPI_API_KEY")
-
         if not self.api_key:
-            raise ValueError("SERPAPI_API_KEY not found in .env")
-
+            raise ValueError("SERPAPI_API_KEY não encontrada no .env")
         self.url = "https://google.serper.dev/search"
 
-    def search_web(self, query: str) -> List[Dict]:
-        payload = {"q": query}
-
-        headers = {
-            "X-API-KEY": self.api_key,
-            "Content-Type": "application/json",
-        }
-
+    def run(self, query: str) -> List[Dict]:
         response = requests.post(
             self.url,
-            json=payload,
-            headers=headers,
+            json={"q": query},
+            headers={
+                "X-API-KEY": self.api_key,
+                "Content-Type": "application/json",
+            },
             timeout=30,
         )
         response.raise_for_status()
 
-        data = response.json()
-        organic = data.get("organic", [])[: self.k]
+        organic = response.json().get("organic", [])[: self.k]
 
-        normalized = [
+        return [
             {
                 "title": r.get("title"),
                 "link": r.get("link"),
@@ -43,4 +51,23 @@ class SerpAPIETool:
             for r in organic
         ]
 
-        return normalized
+
+# Instância pronta para uso nos nós
+web_search_tool = SerperSearchTool(k=5)
+
+
+@tool
+def web_search(query: str) -> str:
+    """
+    Realiza busca no Google via Serper e retorna os top resultados formatados.
+    Use para perguntas sobre eventos recentes, fatos, notícias ou qualquer
+    informação que exija busca na internet.
+    """
+    results = web_search_tool.run(query)
+    if not results:
+        return "Nenhum resultado encontrado."
+
+    return "\n\n".join(
+        f"**{r['title']}**\n{r['snippet']}\n🔗 {r['link']}"
+        for r in results
+    )
