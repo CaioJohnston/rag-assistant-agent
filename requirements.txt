@@ -5,9 +5,10 @@ langchain-community
 langchain-core
 langgraph
 psycopg2-binary
-azure-search-documents
+sqlglot
+azure-search-documents>=11.4.0
 azure-core
-openai
+openai>=1.0.0
 pypdf
 requests
 pytest
