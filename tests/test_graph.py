@@ -1,5 +1,5 @@
 """
-test_graph.py — Testes unitários do grafo LangGraph.
+tests/test_graph.py — Testes unitários do grafo LangGraph.
 """
 
 from unittest.mock import patch, MagicMock
@@ -14,16 +14,25 @@ def test_graph_compiles():
 
 def test_graph_routes_to_web_search():
     """
-    Dado um input sobre notícias, o router deve escolher web_search
-    e o grafo deve retornar um output não-vazio.
+    Router deve escolher web_search e o grafo retornar output não-vazio.
+    _get_llm() é chamada duas vezes: uma no router, outra no responder.
+    Usamos side_effect com duas instâncias mock distintas.
     """
     graph = build_graph()
 
-    mock_results = [
+    mock_router_llm   = MagicMock()
+    mock_router_llm.invoke.return_value = MagicMock(content="web_search")
+
+    mock_responder_llm = MagicMock()
+    mock_responder_llm.invoke.return_value = MagicMock(content="Aqui estão as notícias.")
+
+    mock_tool_results = [
         {"title": "Test", "link": "https://test.com", "snippet": "Test snippet"}
     ]
 
-    with patch("tools.web_search.SerperSearchTool.run", return_value=mock_results):
+    with patch("graph.nodes._get_llm", side_effect=[mock_router_llm, mock_responder_llm]), \
+         patch("tools.web_search.SerperSearchTool.run", return_value=mock_tool_results):
+
         result = graph.invoke({
             "messages": [{"role": "user", "content": "latest LangChain news"}]
         })
@@ -35,18 +44,18 @@ def test_graph_routes_to_web_search():
 
 def test_graph_handles_no_tool():
     """
-    Dado um input genérico, o grafo deve retornar uma resposta mesmo sem tool.
+    Com tool=none, o grafo deve retornar mensagem padrão sem chamar nenhuma tool.
     """
     graph = build_graph()
 
-    with patch("graph.nodes.llm_router") as mock_llm:
-        mock_llm.invoke.return_value = MagicMock(content="none")
+    mock_router_llm = MagicMock()
+    mock_router_llm.invoke.return_value = MagicMock(content="none")
 
-        with patch("graph.nodes.llm_responder") as mock_resp:
-            mock_resp.invoke.return_value = MagicMock(content="Olá! Como posso ajudar?")
-
-            result = graph.invoke({
-                "messages": [{"role": "user", "content": "olá"}]
-            })
+    # responder não é chamado quando tool_result é None
+    with patch("graph.nodes._get_llm", side_effect=[mock_router_llm]):
+        result = graph.invoke({
+            "messages": [{"role": "user", "content": "olá"}]
+        })
 
     assert "output" in result
+    assert result["output"] == "Não encontrei informações relevantes para sua pergunta."

@@ -27,36 +27,39 @@ def test_update_bloqueado():
     assert _is_safe("UPDATE clima_mensal SET temp_media = 30") is False
 
 
-# teste de execução com mock
+# teste de execução com mock — patcha os imports dentro do método _init()
 
 def test_sql_tool_retorna_resultado():
-    with patch("tools.sql_query.SQLDatabase"), \
-         patch("tools.sql_query.AzureChatOpenAI") as mock_llm_cls, \
-         patch("tools.sql_query.SQLDatabaseToolkit") as mock_toolkit_cls:
+    from tools.sql_query import SQLQueryTool
 
-        # mock do LLM gerando SQL válido
-        mock_llm = MagicMock()
-        mock_llm.invoke.return_value = MagicMock(
-            content="SELECT nome_mes, temp_media FROM clima_mensal LIMIT 3"
-        )
-        mock_llm_cls.return_value = mock_llm
+    tool = SQLQueryTool()
 
-        # mock do toolkit retornando resultado
-        mock_query_tool = MagicMock()
-        mock_query_tool.name = "sql_db_query"
-        mock_query_tool.invoke.return_value = "[('Janeiro', 26.0), ('Fevereiro', 25.8)]"
+    # mock do LLM
+    mock_llm = MagicMock()
+    mock_llm.invoke.return_value = MagicMock(
+        content="SELECT nome_mes, temp_media FROM clima_mensal LIMIT 3"
+    )
 
-        mock_info_tool = MagicMock()
-        mock_info_tool.name = "sql_db_schema"
-        mock_info_tool.invoke.return_value = "CREATE TABLE clima_mensal ..."
+    # mock das tools do toolkit
+    mock_query_tool = MagicMock()
+    mock_query_tool.name = "sql_db_query"
+    mock_query_tool.invoke.return_value = "[('Janeiro', 26.0), ('Fevereiro', 25.8)]"
 
-        mock_toolkit = MagicMock()
-        mock_toolkit.get_tools.return_value = [mock_query_tool, mock_info_tool]
-        mock_toolkit_cls.return_value = mock_toolkit
+    mock_info_tool = MagicMock()
+    mock_info_tool.name = "sql_db_schema"
+    mock_info_tool.invoke.return_value = "CREATE TABLE clima_mensal ..."
 
-        from tools.sql_query import SQLQueryTool
-        tool = SQLQueryTool()
-        result = tool.run("Qual a temperatura média em janeiro?")
+    mock_toolkit = MagicMock()
+    mock_toolkit.get_tools.return_value = [mock_query_tool, mock_info_tool]
 
-        assert "SELECT" in result
-        assert "Resultado" in result
+    # injeta mocks diretamente no objeto (bypass do _init)
+    tool._db          = MagicMock()
+    tool._llm         = mock_llm
+    tool._toolkit     = mock_toolkit
+    tool._query_tool  = mock_query_tool
+    tool._info_tool   = mock_info_tool
+
+    result = tool.run("Qual a temperatura média em janeiro?")
+
+    assert "SELECT" in result
+    assert "Resultado" in result

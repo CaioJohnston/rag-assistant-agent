@@ -1,41 +1,37 @@
 """
 graph/nodes.py — Funções de nó do grafo LangGraph.
 
-Cada função recebe o AgentState atual e retorna um dict
-com as chaves a serem atualizadas no estado.
-
-Nós implementados:
-  - router_node   : decide qual tool usar com base no input do usuário
-  - tool_node     : executa a tool escolhida pelo router
-  - response_node : formata a resposta final para o usuário
-
-Nós planejados:
-  - memory_node   : injeta histórico relevante no contexto [TODO fase 4.4]
+Lazy imports nas tools que dependem de serviços externos (Azure Search, Postgres)
+evitam falhas de conexão no momento do import durante testes locais.
 """
 
+import os
+from dotenv import load_dotenv
 from langchain_openai import AzureChatOpenAI
 from graph.state import AgentState
-from tools.web_search import web_search_tool
-from tools.rag_search import rag_tool
-from tools.sql_query import sql_tool
-import os
 
-# LLMs
-llm_router = AzureChatOpenAI(
-    azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT"),
-    api_key=os.getenv("AZURE_OPENAI_KEY"),
-    api_version="2024-05-01-preview",
-    azure_deployment=os.getenv("AZURE_OPENAI_DEPLOYMENT", "gpt-4o"),
-    temperature=0,
-)
+load_dotenv(override=True)
 
-llm_responder = AzureChatOpenAI(
-    azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT"),
-    api_key=os.getenv("AZURE_OPENAI_KEY"),
-    api_version="2024-05-01-preview",
-    azure_deployment=os.getenv("AZURE_OPENAI_DEPLOYMENT", "gpt-4o"),
-    temperature=0.3,
-)
+
+def _get_llm(temperature: float = 0):
+    return AzureChatOpenAI(
+        azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT"),
+        api_key=os.getenv("AZURE_OPENAI_KEY"),
+        api_version="2024-05-01-preview",
+        azure_deployment=os.getenv("AZURE_OPENAI_DEPLOYMENT", "gpt-4o"),
+        temperature=temperature,
+    )
+
+
+def _extract_content(message) -> str:
+    """
+    Extrai o texto de uma mensagem independente do formato.
+    LangGraph converte dicts em HumanMessage/AIMessage automaticamente,
+    então precisamos lidar com ambos os casos.
+    """
+    if isinstance(message, dict):
+        return message.get("content", "")
+    return getattr(message, "content", str(message))
 
 
 # router node
@@ -56,9 +52,9 @@ Rules:
 """
 
 def router_node(state: AgentState) -> dict:
-    last_message = state["messages"][-1]["content"]
+    last_message = _extract_content(state["messages"][-1])
 
-    decision = llm_router.invoke([
+    decision = _get_llm().invoke([
         {"role": "system", "content": ROUTER_PROMPT},
         {"role": "user",   "content": last_message},
     ]).content.strip().lower()
@@ -72,19 +68,21 @@ def router_node(state: AgentState) -> dict:
 # tool node
 
 def tool_node(state: AgentState) -> dict:
-    tool    = state.get("tool")
-    query   = state["messages"][-1]["content"]
+    tool  = state.get("tool")
+    query = _extract_content(state["messages"][-1])
 
     if tool == "web_search":
+        from tools.web_search import web_search_tool
         return {"tool_result": web_search_tool.run(query)}
 
     if tool == "rag":
+        from tools.rag_search import rag_tool
         return {"tool_result": rag_tool.run(query)}
 
     if tool == "sql":
+        from tools.sql_query import sql_tool
         return {"tool_result": sql_tool.run(query)}
 
-    # placeholder — implementado na fase 2.4
     if tool == "weather":
         return {"tool_result": "[Weather] Ferramenta ainda não implementada."}
 
@@ -103,13 +101,13 @@ Tool result:
 
 def response_node(state: AgentState) -> dict:
     tool_result  = state.get("tool_result")
-    last_message = state["messages"][-1]["content"]
+    last_message = _extract_content(state["messages"][-1])
 
     if not tool_result:
         output = "Não encontrei informações relevantes para sua pergunta."
     else:
         prompt = RESPONDER_PROMPT.format(tool_result=str(tool_result))
-        output = llm_responder.invoke([
+        output = _get_llm(temperature=0.3).invoke([
             {"role": "system", "content": prompt},
             {"role": "user",   "content": last_message},
         ]).content.strip()

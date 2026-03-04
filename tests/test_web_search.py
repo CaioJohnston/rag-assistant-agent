@@ -1,5 +1,5 @@
 """
-test_web_search.py — Testes unitários da tool de busca web (Serper).
+tests/test_web_search.py — Testes unitários da tool de busca web (Serper).
 """
 
 from unittest.mock import patch, MagicMock
@@ -7,7 +7,7 @@ from tools.web_search import SerperSearchTool
 
 
 def test_serper_returns_list():
-    """search deve retornar uma lista de dicts com title, link, snippet."""
+    """run() deve retornar lista de dicts com title, link, snippet."""
     mock_response = MagicMock()
     mock_response.json.return_value = {
         "organic": [
@@ -17,7 +17,7 @@ def test_serper_returns_list():
     }
     mock_response.raise_for_status = MagicMock()
 
-    with patch("my_agent.utils.tools.requests.post", return_value=mock_response):
+    with patch("tools.web_search.requests.post", return_value=mock_response):
         tool = SerperSearchTool(k=5)
         tool.api_key = "fake-key"
         results = tool.run("LangChain agents")
@@ -25,7 +25,7 @@ def test_serper_returns_list():
     assert isinstance(results, list)
     assert len(results) == 2
     assert results[0]["title"] == "T1"
-    assert "link" in results[0]
+    assert "link"    in results[0]
     assert "snippet" in results[0]
 
 
@@ -37,7 +37,7 @@ def test_serper_respects_k():
     }
     mock_response.raise_for_status = MagicMock()
 
-    with patch("my_agent.utils.tools.requests.post", return_value=mock_response):
+    with patch("tools.web_search.requests.post", return_value=mock_response):
         tool = SerperSearchTool(k=3)
         tool.api_key = "fake-key"
         results = tool.run("test query")
@@ -46,7 +46,6 @@ def test_serper_respects_k():
 
 
 if __name__ == "__main__":
-    # Execução manual com API key real (para debug)
     tool = SerperSearchTool(k=3)
     results = tool.run("LangChain agents")
     print(f"Resultados: {len(results)}")
