@@ -1,7 +1,6 @@
 -- db/init.sql
 -- Schema e dados climáticos de Belém extraídos do documento OrientalDoc128
 -- Fonte: Embrapa Amazônia Oriental — "Aspectos Climáticos de Belém nos Últimos Cem Anos" (2002)
--- Executado automaticamente pelo PostgreSQL no primeiro `docker compose up`
 
 
 -- tabela principal: médias mensais 1967-1996
@@ -10,20 +9,20 @@ CREATE TABLE IF NOT EXISTS clima_mensal (
     id              SERIAL PRIMARY KEY,
     mes             INT         NOT NULL CHECK (mes BETWEEN 1 AND 12),
     nome_mes        VARCHAR(20) NOT NULL,
-    temp_max        NUMERIC(4,1),   -- temperatura máxima média (°C)
-    temp_min        NUMERIC(4,1),   -- temperatura mínima média (°C)
-    temp_max_abs    NUMERIC(4,1),   -- temperatura máxima absoluta (°C)
-    temp_min_abs    NUMERIC(4,1),   -- temperatura mínima absoluta (°C)
-    temp_media      NUMERIC(4,1),   -- temperatura média (°C)
-    umidade_rel     INT,            -- umidade relativa média (%)
-    chuva_total     NUMERIC(6,1),   -- precipitação total mensal (mm)
-    chuva_max_24h   INT,            -- chuva máxima em 24h (mm)
-    insolacao_h     NUMERIC(6,1),   -- insolação total mensal (horas)
-    vento_dir       VARCHAR(5),     -- direção predominante do vento
-    vento_vel       NUMERIC(3,1)    -- velocidade média do vento (m/s)
+    temp_max        NUMERIC(4,1),
+    temp_min        NUMERIC(4,1),
+    temp_max_abs    NUMERIC(4,1),
+    temp_min_abs    NUMERIC(4,1),
+    temp_media      NUMERIC(4,1),
+    umidade_rel     INT,
+    chuva_total     NUMERIC(6,1),
+    chuva_max_24h   INT,
+    insolacao_h     NUMERIC(6,1),
+    vento_dir       VARCHAR(5),
+    vento_vel       NUMERIC(3,1)
 );
 
-INSERT INTO clima_mensal VALUES
+INSERT INTO clima_mensal (mes, nome_mes, temp_max, temp_min, temp_max_abs, temp_min_abs, temp_media, umidade_rel, chuva_total, chuva_max_24h, insolacao_h, vento_dir, vento_vel) VALUES
     (1,  'Janeiro',   31.1, 22.9, 34.3, 20.0, 26.0, 88, 378.1, 107, 140.9, 'NE', 1.3),
     (2,  'Fevereiro', 30.7, 23.0, 34.7, 20.2, 25.8, 89, 426.6, 130, 108.4, 'NE', 1.3),
     (3,  'Março',     30.7, 23.1, 36.0, 20.5, 26.0, 89, 441.2, 136, 111.5, 'NE', 1.3),
@@ -41,15 +40,15 @@ INSERT INTO clima_mensal VALUES
 -- tabela de séries históricas: comparativo entre períodos
 
 CREATE TABLE IF NOT EXISTS series_historicas (
-    id          SERIAL PRIMARY KEY,
-    periodo     VARCHAR(20) NOT NULL,   -- ex: '1896-1922'
-    mes         INT         NOT NULL CHECK (mes BETWEEN 1 AND 12),
-    nome_mes    VARCHAR(20) NOT NULL,
-    temp_max    NUMERIC(4,1),
-    temp_min    NUMERIC(4,1),
-    temp_media  NUMERIC(4,1),
-    umidade_rel INT,
-    chuva_total NUMERIC(6,1),
+    id            SERIAL PRIMARY KEY,
+    periodo       VARCHAR(20) NOT NULL,
+    mes           INT         NOT NULL CHECK (mes BETWEEN 1 AND 12),
+    nome_mes      VARCHAR(20) NOT NULL,
+    temp_max      NUMERIC(4,1),
+    temp_min      NUMERIC(4,1),
+    temp_media    NUMERIC(4,1),
+    umidade_rel   INT,
+    chuva_total   NUMERIC(6,1),
     chuva_max_24h NUMERIC(6,1)
 );
 
@@ -84,15 +83,15 @@ INSERT INTO series_historicas (periodo, mes, nome_mes, temp_max, temp_min, temp_
     ('1930-1960', 12, 'Dezembro',  31.8, 22.4, 26.3, 85, 197.3,  84.6);
 
 
--- tabela de resumo anual por período (para queries de tendência)
+-- tabela de resumo anual por período
 
 CREATE TABLE IF NOT EXISTS resumo_anual (
-    id              SERIAL PRIMARY KEY,
-    periodo         VARCHAR(20) NOT NULL,
-    temp_media_anual NUMERIC(4,1),
+    id                SERIAL PRIMARY KEY,
+    periodo           VARCHAR(20) NOT NULL,
+    temp_media_anual  NUMERIC(4,1),
     chuva_total_anual NUMERIC(7,1),
-    umidade_media   INT,
-    fonte           TEXT
+    umidade_media     INT,
+    fonte             TEXT
 );
 
 INSERT INTO resumo_anual (periodo, temp_media_anual, chuva_total_anual, umidade_media, fonte) VALUES

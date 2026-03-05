@@ -5,6 +5,9 @@ services:
       context: .
       dockerfile: app/Dockerfile
     env_file: .env
+    environment:
+      RUNNING_IN_DOCKER: "true"   # sinaliza para o conftest e para o código
+      POSTGRES_HOST: postgres      # garante o host correto independente do .env
     ports:
       - "${STREAMLIT_PORT:-8501}:8501"
     depends_on:
@@ -21,7 +24,7 @@ services:
       POSTGRES_DB: ${POSTGRES_DB}
     volumes:
       - pgdata:/var/lib/postgresql/data
-      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql  # seed automatico
+      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql
     ports:
       - "5432:5432"
     healthcheck:
