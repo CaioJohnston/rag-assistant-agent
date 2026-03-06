@@ -2,21 +2,21 @@
 agents/base_agent_class.py — Classe base para agentes com Function Calling via Azure AI Foundry.
 
 Fluxo com Function Calling:
-  1. query chega ao Foundry
-  2. Foundry decide chamar a tool (emite tool_call)
-  3. SDK executa automaticamente a função Python (enable_auto_function_calls)
-  4. resultado volta para o Foundry
-  5. Foundry formula a resposta final
+1. query chega ao Foundry
+2. Foundry decide chamar a tool (emite tool_call)
+3. SDK executa automaticamente a função Python (enable_auto_function_calls)
+4. resultado volta para o Foundry
+5. Foundry formula a resposta final
 
-Os agentes são criados uma única vez via:
-    python agents/init_agents.py
+Os agentes são criados uma única vez via: python agents/init_agents.py
 
 Em runtime, _get_agent_id() resolve o ID em 2 etapas:
-  1. cache em memória  — instantâneo
-  2. list_agents()     — fallback na primeira chamada após restart
+1. cache em memória  — instantâneo
+2. list_agents()     — fallback na primeira chamada após restart
 """
 
 import os
+import functools
 from azure.ai.agents import AgentsClient
 from azure.ai.agents.models import FunctionTool, ToolSet, RunStatus
 from azure.identity import ClientSecretCredential
@@ -71,20 +71,34 @@ class BaseFoundryAgent:
                 return agent.id
 
         raise RuntimeError(
-            f"Agente '{self.NAME}' não encontrado no Foundry. "
+            f"Agente '{self.NAME}' nao encontrado no Foundry. "
             f"Execute: python agents/init_agents.py"
         )
 
-    def run(self, query: str) -> str:
+    def _wrap_for_debug(self, fn, debug: dict):
+        """
+        Envolve uma tool function para capturar input/output no debug dict.
+        Usa functools.wraps para preservar __name__ e __doc__ —
+        obrigatório para o FunctionTool gerar o schema correto para o Foundry.
+        """
+        @functools.wraps(fn)
+        def wrapper(*args, **kwargs):
+            entry = {"tool": fn.__name__, "input": args[0] if args else str(kwargs)}
+            result = fn(*args, **kwargs)
+            entry["output"] = result[:800] if isinstance(result, str) else str(result)[:800]
+            debug.setdefault("tools_called", []).append(entry)
+            return result
+        return wrapper
+
+    def _execute(self, client: AgentsClient, agent_id: str, query: str, tool_functions: set) -> str:
         """
         Executa o ciclo completo com Function Calling:
           query → Foundry → tool_call → Python executa → Foundry responde
-        """
-        client   = self._get_client()
-        agent_id = self._get_agent_id(client)
 
-        # registra as funções Python que o Foundry pode chamar
-        tool_functions = self._get_tool_functions()
+        toolset é passado tanto no enable_auto_function_calls quanto no
+        create_and_process — sem isso o Foundry nao sabe que as tools existem.
+        """
+        toolset = None
 
         if tool_functions:
             toolset = ToolSet()
@@ -102,6 +116,7 @@ class BaseFoundryAgent:
         run = client.runs.create_and_process(
             thread_id=thread.id,
             agent_id=agent_id,
+            toolset=toolset,
         )
 
         if run.status != RunStatus.COMPLETED:
@@ -118,3 +133,36 @@ class BaseFoundryAgent:
             for block in assistant_msgs[-1].content
             if hasattr(block, "text")
         )
+
+    def _wrap_for_debug(self, fn, debug: dict):
+        """
+        Envolve uma tool function para capturar input/output no debug dict.
+        Usa functools.wraps para preservar __name__ e __doc__ —
+        obrigatório para o FunctionTool gerar o schema correto para o Foundry.
+        """
+        @functools.wraps(fn)
+        def wrapper(*args, **kwargs):
+            entry = {"tool": fn.__name__, "input": args[0] if args else str(kwargs)}
+            result = fn(*args, **kwargs)
+            entry["output"] = result[:800] if isinstance(result, str) else str(result)[:800]
+            debug.setdefault("tools_called", []).append(entry)
+            return result
+        return wrapper
+
+    def run(self, query: str) -> str:
+        """Executa sem debug — usa as tool functions originais."""
+        client   = self._get_client()
+        agent_id = self._get_agent_id(client)
+        return self._execute(client, agent_id, query, self._get_tool_functions())
+
+    def run_with_debug(self, query: str) -> tuple[str, dict]:
+        """
+        Executa com debug — wrapa cada tool function para capturar
+        input/output e retorna (resposta, debug) com tools_called populado.
+        """
+        debug    = {"agent": self.NAME}
+        client   = self._get_client()
+        agent_id = self._get_agent_id(client)
+        wrapped  = {self._wrap_for_debug(fn, debug) for fn in self._get_tool_functions()}
+        response = self._execute(client, agent_id, query, wrapped)
+        return response, debug
