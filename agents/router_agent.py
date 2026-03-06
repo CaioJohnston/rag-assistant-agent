@@ -1,27 +1,37 @@
 """
-router_agent.py — Ponto de entrada do agente para a UI e os testes.
+agents/router_agent.py — Ponto de entrada do pipeline multi-agent (Foundry).
 
-Importa o grafo compilado de my_agent.agent e expõe:
-  - run_agent(user_input)   : invocação simples, retorna string
-  - stream_agent(user_input): gerador para streaming na UI  [TODO fase 5]
+Pipeline:
+  query → UserAgent → OrchestratorAgent → Agente Especializado → resposta
+
+UserAgent     : valida e reformula a query
+OrchestratorAgent : decide qual especialista usar
+Especialistas : WebSearchAgent, RAGAgent, SQLAgent, WeatherAgent
 """
 
-"""
-agents/router_agent.py — Ponto de entrada do agente para a UI e os testes.
+import os
+from dotenv import load_dotenv
 
-Importa o grafo compilado de graph/workflow e expõe:
-  - run_agent(user_input)    : invocação simples, retorna string
-  - stream_agent(user_input) : gerador para streaming na UI  [TODO fase 5]
-"""
-
-from graph.workflow import graph
+load_dotenv(override=True)
 
 
 def run_agent(user_input: str) -> str:
     """
-    Invoca o grafo com o input do usuário e retorna a resposta final.
+    Executa o pipeline completo:
+      1. UserAgent valida e reformula a query
+      2. Bloqueia se UserAgent retornar BLOCKED
+      3. OrchestratorAgent decide e delega ao especialista
     """
-    result = graph.invoke({
-        "messages": [{"role": "user", "content": user_input}]
-    })
-    return result.get("output", "Não foi possível gerar uma resposta.")
+    from agents.user_agent import user_agent
+    from agents.specialized_agents import OrchestratorAgent
+
+    # etapa 1 — validação e reformulação
+    processed_query = user_agent.run(user_input)
+
+    # etapa 2 — bloqueia queries inválidas
+    if processed_query.upper().startswith("BLOCKED:"):
+        reason = processed_query.split(":", 1)[-1].strip()
+        return f"Não posso responder a essa pergunta: {reason}"
+
+    # etapa 3 — orquestração e resposta
+    return OrchestratorAgent().run(processed_query)
