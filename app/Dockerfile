@@ -18,7 +18,11 @@ RUN pip install --no-cache-dir -r requirements.txt
 # copia código
 COPY . .
 
+# copia e configura o entrypoint (converte CRLF -> LF para compatibilidade Linux)
+COPY entrypoint.sh /entrypoint.sh
+RUN sed -i 's/\r//' /entrypoint.sh && chmod +x /entrypoint.sh
+
 # expõe porta do streamlit
 EXPOSE 8501
 
-CMD ["streamlit", "run", "ui/app.py", "--server.port=8501", "--server.address=0.0.0.0", "--server.headless=true"]
+ENTRYPOINT ["/entrypoint.sh"]
