@@ -1,11 +1,14 @@
 """
 agents/router_agent.py — Ponto de entrada do pipeline multi-agent (Foundry).
 
-Pipeline com loop de refinamento:
-  query → UserAgent.run() → loop (max 3x):
-  OrchestratorAgent.run_with_debug()
-  UserAgent.validate()  → "ok": finaliza
-                        → "insufficient": reinjeta feedback e repete
+Pipeline com loop de refinamento e thread persistente:
+  query -> UserAgent.run()
+        -> OrchestratorAgent cria thread no Foundry
+        -> loop (max 3x) na MESMA thread:
+            OrchestratorAgent recebe feedback como mensagem de usuario
+            Modelo ve historico completo e decide quais tools ainda faltam
+            UserAgent.validate() -> "ok"          : finaliza
+                                  -> "insufficient": injeta feedback na mesma thread
 """
 
 import time
@@ -29,8 +32,7 @@ class _JsonFormatter(logging.Formatter):
             "logger":    record.name,
             "message":   record.getMessage(),
         }
-        # campos extras adicionados via extra={} no log call
-        for key in ("pipeline_step", "elapsed_s", "tool", "input", "blocked", "attempt"):
+        for key in ("pipeline_step", "elapsed_s", "tool", "blocked", "attempt", "thread_id"):
             if hasattr(record, key):
                 payload[key] = getattr(record, key)
         return json.dumps(payload, ensure_ascii=False)
@@ -53,6 +55,22 @@ def _jlog(step: str, message: str, elapsed: float = None, **extra):
     if elapsed is not None:
         kwargs["extra"]["elapsed_s"] = round(elapsed, 3)
     logger.info(message, **kwargs)
+
+
+def _build_feedback_message(feedback: str, attempt: int) -> str:
+    """
+    Monta a mensagem de followup que sera adicionada na thread existente.
+
+    O modelo ve o historico completo da thread e recebe uma instrucao
+    clara sobre o que esta faltando, sem precisar recriar contexto.
+    """
+    return (
+        f"Sua resposta anterior foi considerada INCOMPLETA pelo avaliador.\n\n"
+        f"Feedback: {feedback}\n\n"
+        f"Por favor, complemente sua resposta anterior chamando as tools necessarias "
+        f"para cobrir todos os aspectos da pergunta original. "
+        f"Esta e a tentativa {attempt} de {MAX_ITERATIONS}."
+    )
 
 
 #  pipeline 
@@ -102,26 +120,38 @@ def run_agent_with_debug(user_input: str) -> tuple[str, dict]:
         log("user-agent", "Query aprovada sem alteracao", elapsed_user)
         _jlog("user-agent", "Query aprovada sem alteracao", elapsed_user)
 
-    # etapa 2 — loop de refinamento (max MAX_ITERATIONS voltas)
-    current_query  = processed_query
+    # etapa 2 - loop de refinamento com thread persistente
+    orchestrator   = OrchestratorAgent()
+    thread_id      = None
     last_debug     = {}
     final_response = None
+    feedback       = ""
 
     for attempt in range(1, MAX_ITERATIONS + 1):
         log("LOOP", f"Iteracao {attempt}/{MAX_ITERATIONS}")
         _jlog("LOOP", f"Iteracao {attempt}/{MAX_ITERATIONS}", attempt=attempt)
 
-        # orchestrator executa tools e gera draft
+        # primeira iteracao: envia a query processada e cria a thread
+        # iteracoes seguintes: injeta o feedback na mesma thread
+        # o modelo ve o historico completo e decide naturalmente quais tools faltam
+        if attempt == 1:
+            current_message = processed_query
+        else:
+            current_message = _build_feedback_message(feedback, attempt)
+
         t1 = time.time()
-        log("AGENTE", f"orchestrator-agent recebeu a query (tentativa {attempt})")
-        draft, agent_debug = OrchestratorAgent().run_with_debug(current_query)
+        draft, agent_debug, thread_id = orchestrator.run_with_debug(
+            current_message,
+            thread_id=thread_id,
+        )
         elapsed_orch = time.time() - t1
-        last_debug = agent_debug
+        last_debug   = agent_debug
 
         tools_called = agent_debug.get("tools_called", [])
+
         log(
             "orchestrator-agent",
-            f"{len(tools_called)} tool(s) executada(s) | tempo: {elapsed_orch:.2f}s",
+            f"{len(tools_called)} tool(s) executada(s) | thread: {thread_id} | tempo: {elapsed_orch:.2f}s",
             elapsed_orch,
         )
         _jlog(
@@ -129,32 +159,21 @@ def run_agent_with_debug(user_input: str) -> tuple[str, dict]:
             f"{len(tools_called)} tool(s) executada(s)",
             elapsed_orch,
             attempt=attempt,
+            thread_id=thread_id,
         )
 
         for tool_call in tools_called:
             log(f"TOOL CALL: {tool_call['tool']}", f"Input: {tool_call['input']!r}")
             log(f"TOOL RESULT: {tool_call['tool']}", tool_call.get("output", ""))
-            _jlog(
-                "TOOL CALL",
-                f"Input: {tool_call['input']!r}",
-                tool=tool_call["tool"],
-            )
-            _jlog(
-                "TOOL RESULT",
-                tool_call.get("output", "")[:300],   # truncado para nao poluir o log
-                tool=tool_call["tool"],
-            )
-
-        log("orchestrator-agent", "Draft gerado — enviando para validacao")
+            _jlog("TOOL CALL",   f"Input: {tool_call['input']!r}", tool=tool_call["tool"])
+            _jlog("TOOL RESULT", tool_call.get("output", "")[:300],  tool=tool_call["tool"])
 
         # user-agent valida a resposta
         t2 = time.time()
-        log("AGENTE", f"user-agent validando resposta (tentativa {attempt})")
-        validation = user_agent.validate(processed_query, draft)
+        validation  = user_agent.validate(processed_query, draft)
         elapsed_val = time.time() - t2
-
-        status   = validation.get("status", "ok")
-        feedback = validation.get("feedback", "")
+        status      = validation.get("status", "ok")
+        feedback    = validation.get("feedback", "")
 
         if status == "ok":
             log("user-agent", f"Resposta aprovada na tentativa {attempt}", elapsed_val)
@@ -162,27 +181,15 @@ def run_agent_with_debug(user_input: str) -> tuple[str, dict]:
             final_response = validation.get("response", draft)
             break
 
-        # insufficient — injeta feedback e tenta novamente
         log(
             "user-agent INSUFFICIENT",
             f"Feedback: {feedback!r} | Tentativa {attempt}/{MAX_ITERATIONS}",
             elapsed_val,
         )
-        _jlog(
-            "user-agent INSUFFICIENT",
-            f"Feedback: {feedback!r}",
-            elapsed_val,
-            attempt=attempt,
-        )
+        _jlog("user-agent INSUFFICIENT", f"Feedback: {feedback!r}", elapsed_val, attempt=attempt)
 
-        if attempt < MAX_ITERATIONS:
-            current_query = (
-                f"{processed_query}\n\n"
-                f"FEEDBACK DA TENTATIVA ANTERIOR: {feedback}"
-            )
-        else:
-            # esgotou as tentativas — usa a melhor resposta disponivel
-            log("LOOP", f"Limite de {MAX_ITERATIONS} tentativas atingido — usando ultima resposta")
+        if attempt == MAX_ITERATIONS:
+            log("LOOP", f"Limite de {MAX_ITERATIONS} tentativas atingido")
             _jlog("LOOP", f"Limite de {MAX_ITERATIONS} tentativas atingido")
             final_response = validation.get("response", draft)
 
@@ -191,3 +198,4 @@ def run_agent_with_debug(user_input: str) -> tuple[str, dict]:
     _jlog("PIPELINE END", "Pipeline concluido", total)
 
     return final_response, {"logs": logs, **last_debug}
+    

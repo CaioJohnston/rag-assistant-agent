@@ -8,6 +8,12 @@ Fluxo com Function Calling:
 4. resultado volta para o Foundry
 5. Foundry formula a resposta final
 
+Thread persistente:
+  run_with_debug() aceita thread_id opcional.
+  Se fornecido, continua na thread existente — o modelo ve o historico completo
+  e decide naturalmente quais tools ainda precisam ser chamadas.
+  Se None, cria uma thread nova (comportamento padrao).
+
 Os agentes são criados uma única vez via: python agents/init_agents.py
 
 Em runtime, _get_agent_id() resolve o ID em 2 etapas:
@@ -83,86 +89,85 @@ class BaseFoundryAgent:
         """
         @functools.wraps(fn)
         def wrapper(*args, **kwargs):
-            entry = {"tool": fn.__name__, "input": args[0] if args else str(kwargs)}
+            entry = {
+                "tool":  fn.__name__,
+                "input": args[0] if args else str(kwargs),
+            }
             result = fn(*args, **kwargs)
             entry["output"] = result[:800] if isinstance(result, str) else str(result)[:800]
             debug.setdefault("tools_called", []).append(entry)
             return result
         return wrapper
 
-    def _execute(self, client: AgentsClient, agent_id: str, query: str, tool_functions: set) -> str:
+    def _execute(
+        self,
+        client: AgentsClient,
+        agent_id: str,
+        query: str,
+        tool_functions: set,
+        thread_id: str | None = None,
+    ) -> tuple[str, str]:
         """
-        Executa o ciclo completo com Function Calling:
-          query → Foundry → tool_call → Python executa → Foundry responde
+        Executa uma query no Foundry e retorna (resposta, thread_id).
 
-        toolset é passado tanto no enable_auto_function_calls quanto no
-        create_and_process — sem isso o Foundry nao sabe que as tools existem.
+        Se thread_id for fornecido, adiciona a mensagem na thread existente
+        e continua o historico — o modelo ve todas as trocas anteriores.
+        Se thread_id for None, cria uma thread nova.
         """
-        toolset = None
-
         if tool_functions:
             toolset = ToolSet()
             toolset.add(FunctionTool(tool_functions))
-            # SDK executa os tool_calls automaticamente durante runs.create_and_process
             client.enable_auto_function_calls(toolset)
+        else:
+            toolset = None
 
-        thread = client.threads.create()
-        client.messages.create(
-            thread_id=thread.id,
-            role="user",
-            content=query,
-        )
+        if thread_id is None:
+            thread_id = client.threads.create().id
 
-        run = client.runs.create_and_process(
-            thread_id=thread.id,
-            agent_id=agent_id,
-            toolset=toolset,
-        )
+        client.messages.create(thread_id=thread_id, role="user", content=query)
+
+        kwargs = {"thread_id": thread_id, "agent_id": agent_id}
+        if toolset:
+            kwargs["toolset"] = toolset
+
+        run = client.runs.create_and_process(**kwargs)
 
         if run.status != RunStatus.COMPLETED:
-            return f"[{self.NAME}] Run finalizado com status inesperado: {run.status}"
+            return f"[{self.NAME}] Run finalizado com status inesperado: {run.status}", thread_id
 
-        messages       = list(client.messages.list(thread_id=thread.id))
+        messages       = list(client.messages.list(thread_id=thread_id))
         assistant_msgs = [m for m in messages if m.role == "assistant"]
 
         if not assistant_msgs:
-            return "Não foi possível gerar uma resposta."
+            return "Nao foi possivel gerar uma resposta.", thread_id
 
-        return "".join(
+        response = "".join(
             block.text.value
             for block in assistant_msgs[-1].content
             if hasattr(block, "text")
         )
+        return response, thread_id
 
-    def _wrap_for_debug(self, fn, debug: dict):
-        """
-        Envolve uma tool function para capturar input/output no debug dict.
-        Usa functools.wraps para preservar __name__ e __doc__ —
-        obrigatório para o FunctionTool gerar o schema correto para o Foundry.
-        """
-        @functools.wraps(fn)
-        def wrapper(*args, **kwargs):
-            entry = {"tool": fn.__name__, "input": args[0] if args else str(kwargs)}
-            result = fn(*args, **kwargs)
-            entry["output"] = result[:800] if isinstance(result, str) else str(result)[:800]
-            debug.setdefault("tools_called", []).append(entry)
-            return result
-        return wrapper
-
-    def run(self, query: str) -> str:
-        """Executa sem debug — usa as tool functions originais."""
+    def run(self, query: str, thread_id: str | None = None) -> str:
         client   = self._get_client()
         agent_id = self._get_agent_id(client)
-        return self._execute(client, agent_id, query, self._get_tool_functions())
+        response, _ = self._execute(client, agent_id, query, self._get_tool_functions(), thread_id)
+        return response
 
-    def run_with_debug(self, query: str) -> tuple[str, dict]:
+    def run_with_debug(
+        self,
+        query: str,
+        thread_id: str | None = None,
+    ) -> tuple[str, dict, str]:
         """
-        Executa com debug — wrapa cada tool function para capturar
-        input/output e retorna (resposta, debug) com tools_called populado.
+        Executa a query e retorna (resposta, debug, thread_id).
+
+        O thread_id retornado pode ser passado de volta em chamadas
+        subsequentes para continuar na mesma thread.
         """
         debug    = {"agent": self.NAME}
         client   = self._get_client()
         agent_id = self._get_agent_id(client)
         wrapped  = {self._wrap_for_debug(fn, debug) for fn in self._get_tool_functions()}
-        response = self._execute(client, agent_id, query, wrapped)
-        return response, debug
+        response, used_thread_id = self._execute(client, agent_id, query, wrapped, thread_id)
+        return response, debug, used_thread_id
