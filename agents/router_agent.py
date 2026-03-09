@@ -11,6 +11,7 @@ Pipeline com loop de refinamento e thread persistente:
                                   -> "insufficient": injeta feedback na mesma thread
 """
 
+import os
 import time
 import logging
 import json
@@ -198,4 +199,101 @@ def run_agent_with_debug(user_input: str) -> tuple[str, dict]:
     _jlog("PIPELINE END", "Pipeline concluido", total)
 
     return final_response, {"logs": logs, **last_debug}
+
+
+def run_agent_realtime_stream(user_input: str):
+    """
+    Executa o pipeline emitindo logs em tempo real e, ao final,
+    retorna a resposta textual definitiva para streaming nativo.
+    """
+    from agents.user_agent import user_agent
+    from agents.orchestrator_agent import OrchestratorAgent
+
+    pipeline_start = time.time()
+
+    def format_log(step: str, detail: str, elapsed: float = None):
+        entry = {"step": step, "detail": detail}
+        if elapsed is not None:
+            entry["elapsed"] = f"{elapsed:.2f}s"
+        return {"type": "log", "data": entry}
+
+    yield format_log("PIPELINE START", f"Input recebido: {user_input!r}")
+    _jlog("PIPELINE START", f"Input recebido: {user_input!r}")
+
+    # etapa 1 — UserAgent
+    t0 = time.time()
+    yield format_log("AGENTE", "user-agent recebeu a query")
+    processed_query = user_agent.run(user_input)
+    elapsed_user = time.time() - t0
+
+    if processed_query.upper().startswith("BLOCKED:"):
+        reason = processed_query.split(":", 1)[-1].strip()
+        yield format_log("user-agent BLOCKED", f"Motivo: {reason}", elapsed_user)
+        yield format_log("PIPELINE END", f"Tempo total: {time.time() - pipeline_start:.2f}s")
+        _jlog("user-agent BLOCKED", f"Motivo: {reason}", elapsed_user, blocked=True)
+        return
+
+    if processed_query.strip() != user_input.strip():
+        yield format_log("user-agent", f"Query reformulada: {processed_query!r}", elapsed_user)
+        _jlog("user-agent", f"Query reformulada: {processed_query!r}", elapsed_user)
+    else:
+        yield format_log("user-agent", "Query aprovada sem alteracao", elapsed_user)
+        _jlog("user-agent", "Query aprovada sem alteracao", elapsed_user)
+
+    # etapa 2 - loop
+    orchestrator = OrchestratorAgent()
+    thread_id = None
+    final_response = None
+    feedback = ""
+
+    for attempt in range(1, MAX_ITERATIONS + 1):
+        yield format_log("LOOP", f"Iteracao {attempt}/{MAX_ITERATIONS}")
+        _jlog("LOOP", f"Iteracao {attempt}/{MAX_ITERATIONS}", attempt=attempt)
+
+        current_message = processed_query if attempt == 1 else _build_feedback_message(feedback, attempt)
+
+        t1 = time.time()
+        draft, agent_debug, thread_id = orchestrator.run_with_debug(current_message, thread_id=thread_id)
+        elapsed_orch = time.time() - t1
+
+        tools_called = agent_debug.get("tools_called", [])
+
+        yield format_log(
+            "orchestrator-agent",
+            f"{len(tools_called)} tool(s) executada(s) | thread: {thread_id}",
+            elapsed_orch,
+        )
+        _jlog("orchestrator-agent", f"{len(tools_called)} tool(s)", elapsed_orch, attempt=attempt, thread_id=thread_id)
+
+        for tool_call in tools_called:
+            yield format_log(f"TOOL CALL: {tool_call['tool']}", f"Input: {tool_call['input']!r}")
+            yield format_log(f"TOOL RESULT: {tool_call['tool']}", tool_call.get("output", ""))
+            _jlog("TOOL CALL", f"Input: {tool_call['input']!r}", tool=tool_call["tool"])
+
+        # user-agent validação
+        t2 = time.time()
+        validation = user_agent.validate(processed_query, draft)
+        elapsed_val = time.time() - t2
+        status = validation.get("status", "ok")
+        feedback = validation.get("feedback", "")
+
+        if status == "ok":
+            yield format_log("user-agent", f"Resposta aprovada na tentativa {attempt}", elapsed_val)
+            _jlog("user-agent", f"Resposta aprovada", elapsed_val, attempt=attempt)
+            final_response = validation.get("response", draft)
+            break
+
+        yield format_log("user-agent INSUFFICIENT", f"Feedback: {feedback!r} | Tentativa {attempt}/{MAX_ITERATIONS}", elapsed_val)
+        _jlog("user-agent INSUFFICIENT", f"Feedback: {feedback!r}", elapsed_val, attempt=attempt)
+
+        if attempt == MAX_ITERATIONS:
+            yield format_log("LOOP", f"Limite de {MAX_ITERATIONS} tentativas atingido")
+            final_response = validation.get("response", draft)
+
+    total = time.time() - pipeline_start
+    yield format_log("PIPELINE END", f"Tempo total: {total:.2f}s")
+    _jlog("PIPELINE END", "Pipeline concluido", total)
+
+    # Retorna o texto puro para ser processado pelo st.write_stream do front-end
+    yield {"type": "final_response", "data": final_response or "Nenhuma resposta gerada."}
     
