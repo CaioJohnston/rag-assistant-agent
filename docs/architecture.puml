@@ -1,0 +1,135 @@
+@startuml
+skinparam BackgroundColor #191919
+skinparam defaultFontName Segoe UI, Arial
+skinparam linetype ortho
+skinparam nodesep 60
+skinparam ranksep 80
+skinparam Padding 2
+
+<style>
+rectangle {
+    BackgroundColor transparent
+    LineColor #D38E36
+    LineThickness 1.5
+    RoundCorner 12
+    FontColor #FFFFFF
+    FontSize 12
+    Margin 20
+}
+component {
+    BackgroundColor transparent
+    LineColor transparent
+    FontColor #FFFFFF
+    HorizontalAlignment center
+    FontSize 11
+}
+database {
+    BackgroundColor transparent
+    LineColor #FFFFFF
+    FontColor #FFFFFF
+    HorizontalAlignment center
+    FontSize 11
+    LineThickness 1.2
+}
+actor {
+    BackgroundColor transparent
+    LineColor #FFFFFF
+    FontColor #FFFFFF
+    FontSize 11
+}
+arrow {
+    LineColor #FFFFFF
+    FontColor #FFFFFF
+    FontSize 10
+    LineThickness 1.2
+}
+</style>
+
+left to right direction
+
+' --- DEFINIÇÃO DOS ELEMENTOS ---
+
+actor "Usuario" as user
+
+rectangle "<size:14><&monitor></size> FRONTEND" as front_box {
+    component "<size:40><&grid-four-up></size>\nStreamlit UI\nChat + Debug\nPanel" as streamlit
+}
+
+rectangle "<size:14><&box></size> AGENT PIPELINE (DOCKER)" as agent_box {
+    component "<size:35><&person></size> <size:15><&check></size>\nAgenteUsuario\nValidacao de\nEntrada" as agent_in
+    component "<size:40><&cog></size>\nAgenteOrquestrador\nPlanejamento\n+ Tool Calling" as orchestrator
+    component "<size:35><&person></size> <size:15><&check></size>\nAgenteUsuario\nValidacao de\nResposta" as agent_out
+}
+
+rectangle "<size:14><&layers></size> TOOLS LAYER" as tools_box {
+    component "<size:35><&globe></size>\nbuscar_web" as tool_web
+    component "<size:35><&cloud></size>\nobter_previsao" as tool_weather
+    database "consultar_clim\na_db" as tool_db
+    component "<size:35><&file></size>\nbuscar_docum\nentos (RAG)" as tool_doc
+}
+
+' Grupo da direita empilhado
+rectangle "<size:14><&cloud></size> EXTERNAL APIS" as api_box {
+    component "<size:35><&magnifying-glass></size>\nSerper API\nGoogle Search" as api_serper
+    component "<size:35><&cloud></size>\nOpenWeather\nMap\nWeather API" as api_weather
+}
+
+rectangle "<size:14><&hard-drive></size> DATA LAYER" as data_box {
+    database "PostgreSQL\nHistorico\nClimatico" as db_postgres
+}
+
+rectangle "<size:14><b>A</b></size> AZURE AI PLATFORM" as azure_box {
+    component "<color:#88CCFF><size:40><&magnifying-glass></size></color>\nAzure AI\nSearch\nVector Index\n(RAG)" as az_search
+    component "<color:#0078D4><size:40><&tags></size></color>\nAzure OpenAI\nEmbeddings" as az_embed
+    component "<color:#A437D1><size:40><&bookmark></size></color>\nAzure AI\nFoundry\nGPT-4o Agents" as az_foundry
+}
+
+
+' --- ESTRUTURAÇÃO E EMPILHAMENTO FORÇADO (LAYOUT) ---
+' Isso evita que o PlantUML espalhe as caixas aleatoriamente
+agent_in -[hidden]down-> orchestrator
+orchestrator -[hidden]down-> agent_out
+
+tool_web -[hidden]down-> tool_weather
+tool_weather -[hidden]down-> tool_db
+tool_db -[hidden]down-> tool_doc
+
+api_serper -[hidden]down-> api_weather
+az_search -[hidden]down-> az_embed
+az_embed -[hidden]down-> az_foundry
+
+' Força a coluna da direita a ficar alinhada verticalmente
+api_box -[hidden]down- data_box
+data_box -[hidden]down- azure_box
+
+
+' --- CONEXÕES COM DIREÇÕES ESTRITAS ---
+' O uso de "-right->" e "-left->" força o desenho a ficar em colunas
+user -right-> streamlit : pergunta
+
+streamlit -right-> agent_in
+agent_in -right-> orchestrator
+
+' Retorno para o usuário
+agent_out -left-> streamlit : resposta
+orchestrator -down-> agent_out
+
+' Roteamento do Orquestrador para as Tools
+orchestrator -right-> tool_web
+orchestrator -right-> tool_weather
+orchestrator -right-> tool_db
+orchestrator -right-> tool_doc
+
+' Conexões das Tools para os serviços externos
+tool_web -right-> api_serper
+tool_weather -right-> api_weather
+tool_db -right-> db_postgres
+tool_doc -right-> az_search
+
+' Orquestrador chamando o Foundry (linha que desce no original)
+orchestrator -right-> az_foundry
+
+' Conexão interna do Azure
+az_search -right-> az_embed
+
+@enduml
