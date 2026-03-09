@@ -1,6 +1,6 @@
 # Multi-Agent Assistant
 
-Assistente conversacional baseado em múltiplos agentes orquestrados via **Azure AI Foundry**, com interface em **Streamlit** e suporte a quatro fontes de dados distintas: busca na web, base vetorial, banco de dados PostgreSQL e previsão do tempo.
+Assistente conversacional projetado para responder perguntas sobre o clima de Belém, PA. Baseado em múltiplos agentes orquestrados via **Azure AI Foundry**, com interface em **Streamlit** e suporte a quatro fontes de dados distintas: busca na web, base vetorial, banco de dados e previsão do tempo.
 
 ---
 
@@ -51,6 +51,8 @@ router_agent.run_agent_with_debug()
 ```
 
 Toda a orquestração vive em Python. O Azure AI Foundry hospeda os agentes (modelo + instructions) e executa o loop de Function Calling. Nenhuma conexão entre agentes é configurada no portal (isso é responsabilidade do `router_agent.py`).
+
+<img width="1471" height="801" alt="architecture" src="docs\architecture.png" />
 
 ---
 
