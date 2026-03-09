@@ -9,3 +9,14 @@ sys.path.insert(0, str(Path(__file__).parent))
 # dentro do Docker, o compose injeta POSTGRES_HOST=postgres via .env
 if not os.getenv("RUNNING_IN_DOCKER"):
     os.environ.setdefault("POSTGRES_HOST", "localhost")
+
+def pytest_addoption(parser):
+    try:
+        parser.addoption(
+            "--eval-real",
+            action="store_true",
+            default=False,
+            help="Executa o pipeline real em vez de usar respostas simuladas.",
+        )
+    except ValueError:
+        pass
