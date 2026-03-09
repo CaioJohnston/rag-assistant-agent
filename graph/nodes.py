@@ -72,16 +72,16 @@ def tool_node(state: AgentState) -> dict:
     query = _extract_content(state["messages"][-1])
 
     if tool == "web_search":
-        from tools.web_search import web_search_tool
-        return {"tool_result": web_search_tool.run(query)}
+        from tools.web_search import web_search_tool, WebSearchInput
+        return {"tool_result": web_search_tool.run(WebSearchInput(query=query))}
 
     if tool == "rag":
-        from tools.rag_search import rag_tool
-        return {"tool_result": rag_tool.run(query)}
+        from tools.rag_search import rag_tool, RAGSearchInput
+        return {"tool_result": rag_tool.run(RAGSearchInput(query=query))}
 
     if tool == "sql":
-        from tools.sql_query import sql_tool
-        return {"tool_result": sql_tool.run(query)}
+        from tools.sql_query import sql_tool, SQLQueryInput
+        return {"tool_result": sql_tool.run(SQLQueryInput(question=query))}
 
     if tool == "weather":
         return {"tool_result": "[Weather] Ferramenta ainda não implementada."}

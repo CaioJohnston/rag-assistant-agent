@@ -6,12 +6,12 @@ e faz busca vetorial no Index do Azure AI Search.
 
 Tier Free: sem semantic ranking — usamos apenas vector search.
 
-Entrada : query (str), k (int)
-Saída   : List[Dict] com content, source, score
+Entrada : RAGSearchInput(query, k)
+Saída   : RAGSearchResult(chunks: list[DocumentChunk])
 """
 
 import os
-from typing import List, Dict
+from dataclasses import dataclass, field
 
 from azure.core.credentials import AzureKeyCredential
 from azure.search.documents import SearchClient
@@ -23,6 +23,40 @@ from dotenv import load_dotenv
 load_dotenv()
 
 
+# ── dataclasses de entrada e saída ────────────────────────────────────────────
+
+@dataclass
+class RAGSearchInput:
+    """Entrada tipada para a tool de busca em documentos."""
+    query: str
+    k: int = 3
+
+
+@dataclass
+class DocumentChunk:
+    """Um chunk de documento retornado pela busca vetorial."""
+    content: str = ""
+    source: str = ""
+    title: str = ""
+    score: float = 0.0
+
+
+@dataclass
+class RAGSearchResult:
+    """Saída tipada da tool de busca RAG."""
+    chunks: list[DocumentChunk] = field(default_factory=list)
+
+    def __str__(self) -> str:
+        if not self.chunks:
+            return "Nenhum documento relevante encontrado na base de conhecimento."
+        return "\n\n".join(
+            f"**{c.title or c.source}**\n{c.content}\n Fonte: {c.source}"
+            for c in self.chunks
+        )
+
+
+# ── tool class ────────────────────────────────────────────────────────────────
+
 class AzureRAGTool:
     """
     Wrapper sobre Azure AI Search + Azure OpenAI ada-002.
@@ -30,12 +64,10 @@ class AzureRAGTool:
     Fluxo:
       1. Gera embedding da query via ada-002 (Azure OpenAI / Foundry)
       2. Executa vector search no Index do Azure AI Search
-      3. Retorna os k documentos mais similares
+      3. Retorna os k documentos mais similares como RAGSearchResult
     """
 
-    def __init__(self, k: int = 3):
-        self.k = k
-
+    def __init__(self):
         self.search_client = SearchClient(
             endpoint=os.getenv("AZURE_SEARCH_ENDPOINT"),
             index_name=os.getenv("AZURE_SEARCH_INDEX", "rag-index"),
@@ -51,7 +83,7 @@ class AzureRAGTool:
             "AZURE_OPENAI_EMBEDDING_DEPLOYMENT", "text-embedding-ada-002"
         )
 
-    def _embed(self, text: str) -> List[float]:
+    def _embed(self, text: str) -> list[float]:
         """Gera embedding via ada-002 no Foundry."""
         response = self.openai_client.embeddings.create(
             input=text,
@@ -59,15 +91,13 @@ class AzureRAGTool:
         )
         return response.data[0].embedding
 
-    def run(self, query: str) -> List[Dict]:
-        """
-        Executa vector search e retorna os k resultados mais relevantes.
-        """
-        query_vector = self._embed(query)
+    def run(self, input: RAGSearchInput) -> RAGSearchResult:
+        """Executa vector search e retorna RAGSearchResult tipado."""
+        query_vector = self._embed(input.query)
 
         vector_query = VectorizedQuery(
             vector=query_vector,
-            k_nearest_neighbors=self.k,
+            k_nearest_neighbors=input.k,
             fields="content_vector",   # campo vetorial no Index
         )
 
@@ -75,21 +105,23 @@ class AzureRAGTool:
             search_text=None,           # pure vector search (Free tier)
             vector_queries=[vector_query],
             select=["content", "source", "title"],
-            top=self.k,
+            top=input.k,
         )
 
-        return [
-            {
-                "content": r.get("content", ""),
-                "source": r.get("source", ""),
-                "title": r.get("title", ""),
-                "score": r["@search.score"],
-            }
-            for r in results
-        ]
+        return RAGSearchResult(
+            chunks=[
+                DocumentChunk(
+                    content=r.get("content", ""),
+                    source=r.get("source", ""),
+                    title=r.get("title", ""),
+                    score=r["@search.score"],
+                )
+                for r in results
+            ]
+        )
 
 
-rag_tool = AzureRAGTool(k=3)
+rag_tool = AzureRAGTool()
 
 @tool
 def rag_search(query: str) -> str:
@@ -98,12 +130,4 @@ def rag_search(query: str) -> str:
     Use para perguntas sobre conteúdo da base de conhecimento,
     documentos carregados ou informações internas da empresa.
     """
-    results = rag_tool.run(query)
-
-    if not results:
-        return "Nenhum documento relevante encontrado na base de conhecimento."
-
-    return "\n\n".join(
-        f"**{r['title'] or r['source']}**\n{r['content']}\n Fonte: {r['source']}"
-        for r in results
-    )
+    return str(rag_tool.run(RAGSearchInput(query=query)))

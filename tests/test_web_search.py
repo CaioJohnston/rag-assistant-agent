@@ -3,11 +3,11 @@ tests/test_web_search.py — Testes unitários da tool de busca web (Serper).
 """
 
 from unittest.mock import patch, MagicMock
-from tools.web_search import SerperSearchTool
+from tools.web_search import SerperSearchTool, WebSearchInput, WebSearchResult, SearchResultItem
 
 
-def test_serper_returns_list():
-    """run() deve retornar lista de dicts com title, link, snippet."""
+def test_serper_returns_typed_result():
+    """run() deve retornar WebSearchResult com lista de SearchResultItem."""
     mock_response = MagicMock()
     mock_response.json.return_value = {
         "organic": [
@@ -18,19 +18,20 @@ def test_serper_returns_list():
     mock_response.raise_for_status = MagicMock()
 
     with patch("tools.web_search.requests.post", return_value=mock_response):
-        tool = SerperSearchTool(k=5)
+        tool = SerperSearchTool()
         tool.api_key = "fake-key"
-        results = tool.run("LangChain agents")
+        result = tool.run(WebSearchInput(query="LangChain agents"))
 
-    assert isinstance(results, list)
-    assert len(results) == 2
-    assert results[0]["title"] == "T1"
-    assert "link"    in results[0]
-    assert "snippet" in results[0]
+    assert isinstance(result, WebSearchResult)
+    assert len(result.results) == 2
+    assert isinstance(result.results[0], SearchResultItem)
+    assert result.results[0].title == "T1"
+    assert result.results[0].link == "https://a.com"
+    assert result.results[0].snippet == "S1"
 
 
 def test_serper_respects_k():
-    """O parâmetro k deve limitar o número de resultados."""
+    """O parâmetro k do WebSearchInput deve limitar o número de resultados."""
     mock_response = MagicMock()
     mock_response.json.return_value = {
         "organic": [{"title": f"T{i}", "link": f"https://{i}.com", "snippet": f"S{i}"} for i in range(10)]
@@ -38,16 +39,9 @@ def test_serper_respects_k():
     mock_response.raise_for_status = MagicMock()
 
     with patch("tools.web_search.requests.post", return_value=mock_response):
-        tool = SerperSearchTool(k=3)
+        tool = SerperSearchTool()
         tool.api_key = "fake-key"
-        results = tool.run("test query")
+        result = tool.run(WebSearchInput(query="test query", k=3))
 
-    assert len(results) == 3
-
-
-if __name__ == "__main__":
-    tool = SerperSearchTool(k=3)
-    results = tool.run("LangChain agents")
-    print(f"Resultados: {len(results)}")
-    for r in results:
-        print(r["title"], "—", r["link"])
+    assert isinstance(result, WebSearchResult)
+    assert len(result.results) == 3

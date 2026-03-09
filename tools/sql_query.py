@@ -2,7 +2,7 @@
 tools/sql_query.py — Queries no PostgreSQL via SQLDatabaseToolkit do LangChain.
 
 Fluxo:
-  linguagem natural → LLM gera SQL → executa no Postgres → formata resultado
+  SQLQueryInput(question) → LLM gera SQL → executa no Postgres → SQLQueryResult
 
 Segurança:
   - apenas SELECT permitido (whitelist via sqlglot)
@@ -13,6 +13,7 @@ evitando conexão ao banco no momento do import (quebra testes locais)
 """
 
 import os
+from dataclasses import dataclass
 from dotenv import load_dotenv
 from langchain_core.tools import tool
 
@@ -20,6 +21,34 @@ load_dotenv(override=True)
 
 MAX_ROWS = 50
 
+
+# ── dataclasses de entrada e saída ────────────────────────────────────────────
+
+@dataclass
+class SQLQueryInput:
+    """Entrada tipada para a tool de consulta SQL."""
+    question: str
+
+
+@dataclass
+class SQLQueryResult:
+    """Saída tipada da tool de consulta SQL."""
+    sql: str = ""
+    rows: str = ""
+    blocked: bool = False
+    error: str | None = None
+
+    def __str__(self) -> str:
+        if self.error:
+            return self.error
+        if self.blocked:
+            return "Query bloqueada por segurança: apenas SELECT é permitido."
+        if not self.rows or self.rows == "[]":
+            return "Nenhum resultado encontrado para essa consulta."
+        return f"**Query executada:**\n```sql\n{self.sql}\n```\n\n**Resultado:**\n{self.rows}"
+
+
+# ── validação de SQL ──────────────────────────────────────────────────────────
 
 def _is_safe(sql: str) -> bool:
     """Permite apenas SELECT — bloqueia INSERT, UPDATE, DELETE, DROP, etc."""
@@ -38,11 +67,13 @@ def _is_safe(sql: str) -> bool:
         )
 
 
+# ── tool class ────────────────────────────────────────────────────────────────
+
 class SQLQueryTool:
     """
     Executa queries em linguagem natural no PostgreSQL usando SQLDatabaseToolkit.
-    Entrada : pergunta em linguagem natural (str)
-    Saída   : resultado formatado (str)
+    Entrada : SQLQueryInput (dataclass com campo question)
+    Saída   : SQLQueryResult (dataclass tipada)
 
     Lazy init — db e llm só são criados na primeira chamada a run()
     """
@@ -91,7 +122,8 @@ class SQLQueryTool:
         self._query_tool = next(t for t in tools if t.name == "sql_db_query")
         self._info_tool  = next(t for t in tools if t.name == "sql_db_schema")
 
-    def run(self, question: str) -> str:
+    def run(self, input: SQLQueryInput) -> SQLQueryResult:
+        """Executa a consulta e retorna SQLQueryResult tipado."""
         self._init()
 
         schema = self._info_tool.invoke("clima_mensal, series_historicas, resumo_anual")
@@ -108,7 +140,7 @@ Regras:
 Schema:
 {schema}
 
-Pergunta: {question}
+Pergunta: {input.question}
 
 SQL:"""
 
@@ -116,14 +148,11 @@ SQL:"""
         sql = sql.replace("```sql", "").replace("```", "").strip()
 
         if not _is_safe(sql):
-            return "Query bloqueada por segurança: apenas SELECT é permitido."
+            return SQLQueryResult(sql=sql, blocked=True)
 
         result = self._query_tool.invoke(sql)
 
-        if not result or result == "[]":
-            return "Nenhum resultado encontrado para essa consulta."
-
-        return f"**Query executada:**\n```sql\n{sql}\n```\n\n**Resultado:**\n{result}"
+        return SQLQueryResult(sql=sql, rows=str(result))
 
 
 # instância global — lazy, não conecta ao banco no import
@@ -137,4 +166,4 @@ def sql_query(question: str) -> str:
     Use para perguntas sobre médias mensais, comparações históricas entre períodos,
     temperatura, chuva, umidade ou tendências climáticas ao longo do tempo.
     """
-    return sql_tool.run(question)
+    return str(sql_tool.run(SQLQueryInput(question=question)))

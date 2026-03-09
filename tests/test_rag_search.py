@@ -3,19 +3,19 @@ tests/test_rag_search.py — Testes unitários da tool Azure AI Search (RAG).
 """
 
 from unittest.mock import patch, MagicMock
-from tools.rag_search import AzureRAGTool
+from tools.rag_search import AzureRAGTool, RAGSearchInput, RAGSearchResult, DocumentChunk
 
 
 def _make_tool() -> AzureRAGTool:
     """Instancia AzureRAGTool com credenciais falsas (sem I/O real)."""
     with patch("tools.rag_search.SearchClient"), \
          patch("tools.rag_search.AzureOpenAI"):
-        tool = AzureRAGTool(k=3)
+        tool = AzureRAGTool()
     return tool
 
 
-def test_rag_returns_list():
-    """run() deve retornar uma lista de dicts com content, source, score."""
+def test_rag_returns_typed_result():
+    """run() deve retornar RAGSearchResult com lista de DocumentChunk."""
     tool = _make_tool()
 
     mock_results = [
@@ -28,34 +28,39 @@ def test_rag_returns_list():
     tool.search_client.search = MagicMock(return_value=iter(mock_results))
     tool._embed = MagicMock(return_value=[0.0] * 1536)
 
-    results = tool.run("o que é LangGraph?")
+    result = tool.run(RAGSearchInput(query="o que é LangGraph?"))
 
-    assert isinstance(results, list)
-    assert len(results) == 2
-    assert "content" in results[0]
-    assert "source" in results[0]
-    assert "score" in results[0]
+    assert isinstance(result, RAGSearchResult)
+    assert len(result.chunks) == 2
+    assert isinstance(result.chunks[0], DocumentChunk)
+    assert result.chunks[0].content == "LangGraph é um framework..."
+    assert result.chunks[0].source == "doc1.pdf"
+    assert result.chunks[0].score == 0.95
 
 
 def test_rag_empty_results():
-    """run() deve retornar lista vazia se não houver resultados."""
+    """run() deve retornar RAGSearchResult com lista vazia se não houver resultados."""
     tool = _make_tool()
 
     tool.search_client.search = MagicMock(return_value=iter([]))
     tool._embed = MagicMock(return_value=[0.0] * 1536)
 
-    results = tool.run("pergunta sem resposta")
+    result = tool.run(RAGSearchInput(query="pergunta sem resposta"))
 
-    assert results == []
+    assert isinstance(result, RAGSearchResult)
+    assert result.chunks == []
+
+    # __str__ retorna mensagem amigavel
+    assert "Nenhum documento" in str(result)
 
 
 def test_rag_respects_k():
-    """O parâmetro k deve ser passado corretamente para a query vetorial."""
+    """O parâmetro k do RAGSearchInput deve ser passado para a query vetorial."""
     tool = _make_tool()
     tool._embed = MagicMock(return_value=[0.0] * 1536)
     tool.search_client.search = MagicMock(return_value=iter([]))
 
-    tool.run("teste k")
+    tool.run(RAGSearchInput(query="teste k", k=3))
 
     call_kwargs = tool.search_client.search.call_args
     vector_queries = call_kwargs.kwargs.get("vector_queries", [])

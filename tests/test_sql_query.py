@@ -3,7 +3,7 @@ tests/test_sql_query.py — Testes unitários da tool PostgreSQL.
 """
 
 from unittest.mock import patch, MagicMock
-from tools.sql_query import _is_safe
+from tools.sql_query import _is_safe, SQLQueryTool, SQLQueryInput, SQLQueryResult
 
 
 # testes de sanitização — não precisam de banco real
@@ -29,9 +29,7 @@ def test_update_bloqueado():
 
 # teste de execução com mock — patcha os imports dentro do método _init()
 
-def test_sql_tool_retorna_resultado():
-    from tools.sql_query import SQLQueryTool
-
+def test_sql_tool_retorna_resultado_tipado():
     tool = SQLQueryTool()
 
     # mock do LLM
@@ -59,7 +57,15 @@ def test_sql_tool_retorna_resultado():
     tool._query_tool  = mock_query_tool
     tool._info_tool   = mock_info_tool
 
-    result = tool.run("Qual a temperatura média em janeiro?")
+    result = tool.run(SQLQueryInput(question="Qual a temperatura média em janeiro?"))
 
-    assert "SELECT" in result
-    assert "Resultado" in result
+    assert isinstance(result, SQLQueryResult)
+    assert "SELECT" in result.sql
+    assert len(result.rows) > 0
+    assert result.blocked is False
+    assert result.error is None
+
+    # __str__ preserva o formato legível
+    text = str(result)
+    assert "SELECT" in text
+    assert "Resultado" in text

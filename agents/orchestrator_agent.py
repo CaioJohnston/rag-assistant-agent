@@ -21,15 +21,15 @@ def search_web(query: str) -> str:
     :param query: The search query string.
     :return: Search results with titles, snippets and source URLs.
     """
-    from tools.web_search import SerperSearchTool
-    results = SerperSearchTool().run(query)
-    if not isinstance(results, list):
-        return str(results)
+    from tools.web_search import SerperSearchTool, WebSearchInput
+    result = SerperSearchTool().run(WebSearchInput(query=query))
+    if not result.results:
+        return "Nenhum resultado encontrado."
     lines = [
-        f"TITLE: {r.get('title', '')}\nSNIPPET: {r.get('snippet', '')}\nSOURCE_URL: {r.get('link', '')}"
-        for r in results
+        f"TITLE: {r.title}\nSNIPPET: {r.snippet}\nSOURCE_URL: {r.link}"
+        for r in result.results
     ]
-    return "\n\n".join(lines) if lines else "Nenhum resultado encontrado."
+    return "\n\n".join(lines)
 
 
 def search_documents(query: str) -> str:
@@ -41,18 +41,16 @@ def search_documents(query: str) -> str:
     :param query: The search query string.
     :return: Relevant document chunks with document name and source path.
     """
-    from tools.rag_search import AzureRAGTool
-    results = AzureRAGTool().run(query)
-    if not isinstance(results, list):
-        return str(results)
-    if not results:
+    from tools.rag_search import AzureRAGTool, RAGSearchInput
+    result = AzureRAGTool().run(RAGSearchInput(query=query))
+    if not result.chunks:
         return "Nenhum documento encontrado."
     lines = [
-        f"DOCUMENT: {r.get('title') or r.get('source', 'unknown')}\n"
-        f"CONTENT: {r.get('content', '')}\n"
-        f"SOURCE_PATH: {r.get('source', '')}\n"
-        f"SCORE: {r.get('score', 0):.2f}"
-        for r in results
+        f"DOCUMENT: {c.title or c.source}\n"
+        f"CONTENT: {c.content}\n"
+        f"SOURCE_PATH: {c.source}\n"
+        f"SCORE: {c.score:.2f}"
+        for c in result.chunks
     ]
     return "\n\n".join(lines)
 
@@ -72,8 +70,8 @@ def query_climate_database(question: str) -> str:
     :param question: Natural language question about historical climate data.
     :return: SQL query executed, table used, and query results.
     """
-    from tools.sql_query import SQLQueryTool
-    return str(SQLQueryTool().run(question))
+    from tools.sql_query import SQLQueryTool, SQLQueryInput
+    return str(SQLQueryTool().run(SQLQueryInput(question=question)))
 
 
 def get_weather(city: str) -> str:
@@ -86,8 +84,8 @@ def get_weather(city: str) -> str:
     :param city: City name with optional country code (e.g. 'Belem,BR', 'Sao Paulo,BR').
     :return: Current weather and 5-day forecast from OpenWeatherMap.
     """
-    from tools.weather import OpenWeatherTool
-    return str(OpenWeatherTool().run(city))
+    from tools.weather import OpenWeatherTool, WeatherInput
+    return str(OpenWeatherTool().run(WeatherInput(city=city)))
 
 
 def _extract_city(query: str) -> str:
