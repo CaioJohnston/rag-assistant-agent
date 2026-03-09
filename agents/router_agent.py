@@ -9,12 +9,53 @@ Pipeline com loop de refinamento:
 """
 
 import time
+import logging
+import json
+import sys
 from dotenv import load_dotenv
 
 load_dotenv(override=True)
 
 MAX_ITERATIONS = 3
 
+# logger JSON estruturado para stdout 
+# cada linha emitida e um JSON valido — compativel com Azure Monitor,
+
+class _JsonFormatter(logging.Formatter):
+    def format(self, record: logging.LogRecord) -> str:
+        payload = {
+            "timestamp": self.formatTime(record, "%Y-%m-%dT%H:%M:%S"),
+            "level":     record.levelname,
+            "logger":    record.name,
+            "message":   record.getMessage(),
+        }
+        # campos extras adicionados via extra={} no log call
+        for key in ("pipeline_step", "elapsed_s", "tool", "input", "blocked", "attempt"):
+            if hasattr(record, key):
+                payload[key] = getattr(record, key)
+        return json.dumps(payload, ensure_ascii=False)
+
+
+_handler = logging.StreamHandler(sys.stdout)
+_handler.setFormatter(_JsonFormatter())
+
+logger = logging.getLogger("multi_agent.pipeline")
+logger.setLevel(logging.INFO)
+logger.addHandler(_handler)
+logger.propagate = False   # evita duplicacao no logger raiz
+
+
+# helpers 
+
+def _jlog(step: str, message: str, elapsed: float = None, **extra):
+    """Emite uma linha JSON para stdout com campos padronizados."""
+    kwargs = {"extra": {"pipeline_step": step, **extra}}
+    if elapsed is not None:
+        kwargs["extra"]["elapsed_s"] = round(elapsed, 3)
+    logger.info(message, **kwargs)
+
+
+#  pipeline 
 
 def run_agent(user_input: str) -> str:
     response, _ = run_agent_with_debug(user_input)
@@ -35,6 +76,7 @@ def run_agent_with_debug(user_input: str) -> tuple[str, dict]:
         logs.append(entry)
 
     log("PIPELINE START", f"Input recebido: {user_input!r}")
+    _jlog("PIPELINE START", f"Input recebido: {user_input!r}")
 
     # etapa 1 — UserAgent valida e reformula a query
     t0 = time.time()
@@ -46,6 +88,8 @@ def run_agent_with_debug(user_input: str) -> tuple[str, dict]:
         reason = processed_query.split(":", 1)[-1].strip()
         log("user-agent BLOCKED", f"Motivo: {reason}", elapsed_user)
         log("PIPELINE END", f"Tempo total: {time.time() - pipeline_start:.2f}s")
+        _jlog("user-agent BLOCKED", f"Motivo: {reason}", elapsed_user, blocked=True)
+        _jlog("PIPELINE END", "Pipeline encerrado", time.time() - pipeline_start)
         return f"Nao posso responder a essa pergunta: {reason}", {
             "logs": logs,
             "blocked": True,
@@ -53,8 +97,10 @@ def run_agent_with_debug(user_input: str) -> tuple[str, dict]:
 
     if processed_query.strip() != user_input.strip():
         log("user-agent", f"Query reformulada: {processed_query!r}", elapsed_user)
+        _jlog("user-agent", f"Query reformulada: {processed_query!r}", elapsed_user)
     else:
         log("user-agent", "Query aprovada sem alteracao", elapsed_user)
+        _jlog("user-agent", "Query aprovada sem alteracao", elapsed_user)
 
     # etapa 2 — loop de refinamento (max MAX_ITERATIONS voltas)
     current_query  = processed_query
@@ -63,6 +109,7 @@ def run_agent_with_debug(user_input: str) -> tuple[str, dict]:
 
     for attempt in range(1, MAX_ITERATIONS + 1):
         log("LOOP", f"Iteracao {attempt}/{MAX_ITERATIONS}")
+        _jlog("LOOP", f"Iteracao {attempt}/{MAX_ITERATIONS}", attempt=attempt)
 
         # orchestrator executa tools e gera draft
         t1 = time.time()
@@ -77,15 +124,25 @@ def run_agent_with_debug(user_input: str) -> tuple[str, dict]:
             f"{len(tools_called)} tool(s) executada(s) | tempo: {elapsed_orch:.2f}s",
             elapsed_orch,
         )
+        _jlog(
+            "orchestrator-agent",
+            f"{len(tools_called)} tool(s) executada(s)",
+            elapsed_orch,
+            attempt=attempt,
+        )
 
         for tool_call in tools_called:
-            log(
-                f"TOOL CALL: {tool_call['tool']}",
+            log(f"TOOL CALL: {tool_call['tool']}", f"Input: {tool_call['input']!r}")
+            log(f"TOOL RESULT: {tool_call['tool']}", tool_call.get("output", ""))
+            _jlog(
+                "TOOL CALL",
                 f"Input: {tool_call['input']!r}",
+                tool=tool_call["tool"],
             )
-            log(
-                f"TOOL RESULT: {tool_call['tool']}",
-                tool_call.get("output", ""),
+            _jlog(
+                "TOOL RESULT",
+                tool_call.get("output", "")[:300],   # truncado para nao poluir o log
+                tool=tool_call["tool"],
             )
 
         log("orchestrator-agent", "Draft gerado — enviando para validacao")
@@ -101,6 +158,7 @@ def run_agent_with_debug(user_input: str) -> tuple[str, dict]:
 
         if status == "ok":
             log("user-agent", f"Resposta aprovada na tentativa {attempt}", elapsed_val)
+            _jlog("user-agent", f"Resposta aprovada na tentativa {attempt}", elapsed_val, attempt=attempt)
             final_response = validation.get("response", draft)
             break
 
@@ -109,6 +167,12 @@ def run_agent_with_debug(user_input: str) -> tuple[str, dict]:
             "user-agent INSUFFICIENT",
             f"Feedback: {feedback!r} | Tentativa {attempt}/{MAX_ITERATIONS}",
             elapsed_val,
+        )
+        _jlog(
+            "user-agent INSUFFICIENT",
+            f"Feedback: {feedback!r}",
+            elapsed_val,
+            attempt=attempt,
         )
 
         if attempt < MAX_ITERATIONS:
@@ -119,8 +183,11 @@ def run_agent_with_debug(user_input: str) -> tuple[str, dict]:
         else:
             # esgotou as tentativas — usa a melhor resposta disponivel
             log("LOOP", f"Limite de {MAX_ITERATIONS} tentativas atingido — usando ultima resposta")
+            _jlog("LOOP", f"Limite de {MAX_ITERATIONS} tentativas atingido")
             final_response = validation.get("response", draft)
 
-    log("PIPELINE END", f"Tempo total: {time.time() - pipeline_start:.2f}s")
+    total = time.time() - pipeline_start
+    log("PIPELINE END", f"Tempo total: {total:.2f}s")
+    _jlog("PIPELINE END", "Pipeline concluido", total)
 
     return final_response, {"logs": logs, **last_debug}
